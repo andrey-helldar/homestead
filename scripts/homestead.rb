@@ -167,8 +167,10 @@ class Homestead
                     config.vm.synced_folder folder["map"], folder["to"], type: folder["type"] ||= nil, **options
 
                     # Bindfs support to fix shared folder (NFS) permission issue on Mac
-                    if Vagrant.has_plugin?("vagrant-bindfs")
-                        config.bindfs.bind_folder folder["to"], folder["to"]
+                    if (folder["type"] == "nfs")
+                        if Vagrant.has_plugin?("vagrant-bindfs")
+                            config.bindfs.bind_folder folder["to"], folder["to"]
+                        end
                     end
                 else
                     config.vm.provision "shell" do |s|
@@ -181,6 +183,14 @@ class Homestead
         # Install All The Configured Nginx Sites
         config.vm.provision "shell" do |s|
             s.path = scriptDir + "/clear-nginx.sh"
+        end
+
+        # Temporary fix to disable Z-Ray by default to be fixed in future base box update
+        config.vm.provision "shell" do |s|
+            s.inline = "rm -rf /usr/lib/php/20170718/zray.so"
+        end
+        config.vm.provision "shell" do |s|
+            s.inline = "rm -rf /etc/php/7.2/fpm/conf.d/zray.ini"
         end
 
         if settings.include? 'sites'
@@ -209,7 +219,23 @@ class Homestead
                         params += " )"
                     end
                     s.path = scriptDir + "/serve-#{type}.sh"
-                    s.args = [site["map"], site["to"], site["port"] ||= "80", site["ssl"] ||= "443", site["php"] ||= "7.2", params ||= ""]
+                    s.args = [site["map"], site["to"], site["port"] ||= "80", site["ssl"] ||= "443", site["php"] ||= "7.2", params ||= "", site["zray"] ||= "false"]
+
+                    if site["zray"] == 'true'
+                        config.vm.provision "shell" do |s|
+                            s.inline = "ln -sf /opt/zray/gui/public " + site["to"] + "/ZendServer"
+                        end
+                        config.vm.provision "shell" do |s|
+                            s.inline = "ln -sf /opt/zray/lib/zray.so /usr/lib/php/20170718/zray.so"
+                        end
+                        config.vm.provision "shell" do |s|
+                            s.inline = "ln -sf /opt/zray/zray.ini /etc/php/7.2/fpm/conf.d/zray.ini"
+                        end
+                    else
+                        config.vm.provision "shell" do |s|
+                            s.inline = "rm -rf " + site["to"] + "/ZendServer"
+                        end
+                    end
                 end
 
                 # Configure The Cron Schedule
@@ -353,7 +379,7 @@ class Homestead
         # Update Composer On Every Provision
         config.vm.provision "shell" do |s|
             s.name = "Update Composer"
-            s.inline = "sudo /usr/local/bin/composer self-update && sudo chown -R vagrant:vagrant /home/vagrant/.composer/"
+            s.inline = "sudo /usr/local/bin/composer self-update --no-progress && sudo chown -R vagrant:vagrant /home/vagrant/.composer/"
             s.privileged = false
         end
 
